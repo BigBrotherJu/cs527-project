@@ -39,3 +39,26 @@ Timing + ncu: add `--cap-add SYS_ADMIN` (and mount the profiling tool once it ex
 Containers must run as root with the default `HOME=/root`, where the warmed
 JIT cache lives. Export the agent's result with
 `git add -A && git diff --cached --binary` inside `/workspace/flashinfer`.
+
+## Evaluate a patch
+
+`tasks/<id>/eval/` holds the evaluation-only material: `ref.patch` (the
+upstream answer), `hidden_shapes.json` and `test_hidden_*.py`. Evaluation
+containers are offline and mount `/task` read-only from the host.
+`scripts/in_container/prepare.sh` drops edits to `tests/`, `benchmarks/` and
+`conftest.py` (reporting them) and clears the JIT build cache before anything runs.
+
+Correctness (visible + hidden tests, reference check on visible + hidden shapes):
+
+```bash
+DOCKER="sudo docker" scripts/eval_correctness.sh c3f7334d4 none results/base 0
+DOCKER="sudo docker" scripts/eval_correctness.sh c3f7334d4 tasks/c3f7334d4/eval/ref.patch results/ref 0
+```
+
+Performance (one container per arm, arm order rotated each round):
+
+```bash
+DOCKER="sudo docker" scripts/eval_perf.sh c3f7334d4 results/perf 0 5 base=none ref=tasks/c3f7334d4/eval/ref.patch
+```
+
+Add `agent=<patch>` as a third arm to score an agent run.

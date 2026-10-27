@@ -1,3 +1,6 @@
+# check=skip=InvalidDefaultArgInFrom
+# (BASE_IMAGE has no default on purpose: build_task.sh always passes it.)
+#
 # Task image: FlashInfer at a task's parent commit, flattened to a single-commit
 # repo, editable-installed on top of the CI image that commit was tested with.
 #

@@ -2,8 +2,9 @@
 
 Only the expand call is inside the timed region: inputs (including the shrink
 output it consumes) are built once per shape. GPU time comes from
-flashinfer.testing.bench_gpu_time (CUPTI when available, else CUDA events) with
-a cold L2 before every iteration; the median per shape is reported.
+flashinfer.testing.bench_gpu_time with CUDA events and a cold L2 before every
+iteration; the median per shape is reported. CUDA events, not CUPTI: the CI
+image has no cupti-python, and every arm of a comparison must use one timer.
 
     python /task/bench_task.py                      # shapes in /task/shapes.json
     python /task/bench_task.py --shapes other.json  # e.g. hidden shapes at evaluation
@@ -96,7 +97,7 @@ def main():
             ok = torch.allclose(args[0], reference(args, lora_b), rtol=1e-3, atol=1e-4)
             status = "  ok" if ok else "  MISMATCH"
         times_ms = bench_gpu_time(
-            bgmv_moe_expand, input_args=args, enable_cupti=True,
+            bgmv_moe_expand, input_args=args, enable_cupti=False,
             cold_l2_cache=True, repeat_time_ms=a.repeat_ms,
         )
         med = statistics.median(times_ms) * 1e3
@@ -109,6 +110,8 @@ def main():
     print(f"device: {torch.cuda.get_device_name()}")
     if a.json:
         Path(a.json).write_text(json.dumps({"device": torch.cuda.get_device_name(), "results": results}, indent=1))
+    if any(r.get("check") == "MISMATCH" for r in results):
+        raise SystemExit("check failed: output differs from the torch reference")
 
 
 if __name__ == "__main__":

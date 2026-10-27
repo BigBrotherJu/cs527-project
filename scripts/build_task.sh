@@ -39,9 +39,12 @@ ${DOCKER} build \
 # the agent's diff.
 echo "== warm JIT cache on GPU ${GPU}"
 WARM="warm-${TASK_ID}-$$"
+# FLASHINFER_JIT_VERBOSE shows the (long, otherwise silent) first JIT compile. It is
+# exported inside bash, not passed with -e, because docker commit would bake a -e
+# variable into the image the agent gets.
 ${DOCKER} run --name "${WARM}" --gpus "\"device=${GPU}\"" --ipc=host \
   -w /workspace/flashinfer "${IMAGE}:base" \
-  bash -c "set -e; ${WARMUP_CMD}; git add -A; git commit -q --amend --no-edit; git status --short"
+  bash -c "set -e; export FLASHINFER_JIT_VERBOSE=1; ${WARMUP_CMD}; git add -A; git commit -q --amend --no-edit; git status --short"
 ${DOCKER} commit --change 'CMD ["sleep", "infinity"]' "${WARM}" "${IMAGE}:latest" >/dev/null
 ${DOCKER} rm "${WARM}" >/dev/null
 
