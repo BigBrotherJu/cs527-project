@@ -1,0 +1,15 @@
+{
+  "_comment": "Evaluation-only benchmark shapes for bgmv_moe_expand: ranks, hidden sizes, token counts and dtype the agent never timed, including the rank-64 small-batch corner where a naive change can regress.",
+  "defaults": {"num_experts": 128, "top_k": 2, "num_loras": 8, "num_slices": 1, "dtype": "bfloat16"},
+  "shapes": [
+    {"name": "r8-h768-t4096",        "rank": 8,  "hidden": 768,  "tokens": 4096},
+    {"name": "r16-h2048-t16",        "rank": 16, "hidden": 2048, "tokens": 16},
+    {"name": "r32-h2816-t1024",      "rank": 32, "hidden": 2816, "tokens": 1024},
+    {"name": "r64-h3072-t16",        "rank": 64, "hidden": 3072, "tokens": 16},
+    {"name": "r64-h3072-t64",        "rank": 64, "hidden": 3072, "tokens": 64},
+    {"name": "r64-h7168-t2048",      "rank": 64, "hidden": 7168, "tokens": 2048},
+    {"name": "r32-h3072-t512-fp16",  "rank": 32, "hidden": 3072, "tokens": 512, "dtype": "float16"},
+    {"name": "r16-h1856-t512-top8",  "rank": 16, "hidden": 1856, "tokens": 512, "top_k": 8},
+    {"name": "r32-h2048-t512-2slc",  "rank": 32, "hidden": 2048, "tokens": 512, "num_slices": 2}
+  ]
+}
