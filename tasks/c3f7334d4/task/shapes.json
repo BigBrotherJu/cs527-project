@@ -1,0 +1,12 @@
+{
+  "_comment": "Agent-visible benchmark shapes for bgmv_moe_expand. rank is feat_in, hidden is feat_out; num_pairs = tokens * top_k.",
+  "defaults": {"num_experts": 128, "top_k": 2, "num_loras": 8, "num_slices": 1, "dtype": "bfloat16"},
+  "shapes": [
+    {"name": "r32-h3072-t16",   "rank": 32, "hidden": 3072, "tokens": 16},
+    {"name": "r32-h3072-t512",  "rank": 32, "hidden": 3072, "tokens": 512},
+    {"name": "r32-h3072-t4096", "rank": 32, "hidden": 3072, "tokens": 4096},
+    {"name": "r16-h2688-t512",  "rank": 16, "hidden": 2688, "tokens": 512},
+    {"name": "r16-h2688-t4096", "rank": 16, "hidden": 2688, "tokens": 4096},
+    {"name": "r64-h4096-t512",  "rank": 64, "hidden": 4096, "tokens": 512}
+  ]
+}
