@@ -1,0 +1,13 @@
+2026-10-27 07:12:26,060 - INFO - bgmv_moe.py:134 - flashinfer.jit: Generated BGMV MoE JIT spec: bgmv_moe
+shape                    median us    min us  iters  check
+2026-10-27 07:12:26,072 - INFO - bgmv_moe.py:147 - flashinfer.jit: BGMV MoE module loaded successfully
+r8-h768-t4096                92.83     91.55    147  ok
+r16-h2048-t16                 7.90      7.33    467  ok
+r32-h2816-t1024             185.15    184.00     91  ok
+r64-h3072-t16                12.48     11.62    417  ok
+r64-h3072-t64                30.08     28.58    313  ok
+r64-h7168-t2048            1342.86   1342.05     14  ok
+r32-h3072-t512-fp16         104.96    103.90    143  ok
+r16-h1856-t512-top8         203.74    202.98     83  ok
+r32-h2048-t512-2slc         136.06    134.91    117  ok
+device: NVIDIA H100 80GB HBM3
