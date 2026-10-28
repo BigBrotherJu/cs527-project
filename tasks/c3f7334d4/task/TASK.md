@@ -28,12 +28,16 @@ other shapes and dtypes it supports.
   rank / hidden size.
 - Do not modify `tests/`, `benchmarks/` or `/task`; changes there are discarded
   at evaluation.
+- Your solution is evaluated on the same GPU architecture you are given.
+  Architecture-specific paths are fine; keep the kernel's existing
+  architecture checks working.
 - Your solution is evaluated on the visible tests and benchmark shapes and on
   hidden ones (other ranks, hidden sizes, token counts and fp16).
 
 ## Tools
 
-    pytest -q tests/moe/test_bgmv_moe.py tests/moe/test_bgmv_moe_lora_delta.py
+    pytest -q tests/moe/test_bgmv_moe.py tests/moe/test_bgmv_moe_lora_delta.py \
+        tests/moe/test_trtllm_gen_fused_moe.py::test_moe_lora_delta  # skipped below SM100
     python /task/bench_task.py            # median GPU time per shape (us)
     python /task/bench_task.py --check    # plus a check against a torch reference
 

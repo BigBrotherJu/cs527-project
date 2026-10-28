@@ -1,13 +1,11 @@
 #!/usr/bin/env bash
-# Runs inside a fresh evaluation container: apply a candidate patch with the
-# protected paths filtered out, then drop the JIT build cache so the patched
-# sources are what gets compiled.
+# In a fresh evaluation container: apply a patch minus the protected paths
+# (listed in <out_dir>/patch_files.txt and patch_excluded.txt; non-zero exit if
+# the rest does not apply). The warmed JIT cache stays: the JIT re-stages
+# changed sources and ninja tracks header dependencies, so patched modules are
+# rebuilt on first use.
 #
 #   prepare.sh <patch|none> <out_dir>
-#
-# Writes <out_dir>/patch_files.txt (every path the patch touches, with
-# added/deleted line counts) and <out_dir>/patch_excluded.txt (the protected
-# paths that were dropped). Exits non-zero if the remaining patch does not apply.
 set -euo pipefail
 
 PATCH=$1
@@ -15,8 +13,7 @@ OUT=$2
 mkdir -p "${OUT}"
 cd /workspace/flashinfer
 
-# Paths the agent was told not to touch; edits there are discarded and reported.
-# /task is outside the repo, so a repo diff cannot reach it.
+# Paths the agent was told not to touch (/task is outside the repo).
 PROTECTED=("tests/*" "benchmarks/*" "conftest.py")
 
 if [ "${PATCH}" != "none" ] && [ -s "${PATCH}" ]; then
@@ -34,7 +31,3 @@ else
   echo "no patch (baseline)"
 fi
 
-# Compiled modules and generated sources only; downloaded artifacts stay.
-echo "clearing JIT build cache:"
-find /root/.cache/flashinfer -maxdepth 4 -type d \( -name cached_ops -o -name generated \) \
-  -prune -print -exec rm -rf {} + 2>/dev/null || true

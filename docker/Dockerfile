@@ -1,16 +1,7 @@
 # check=skip=InvalidDefaultArgInFrom
-# (BASE_IMAGE has no default on purpose: build_task.sh always passes it.)
-#
-# Task image: FlashInfer at a task's parent commit, flattened to a single-commit
-# repo, editable-installed on top of the CI image that commit was tested with.
-#
-# Build with scripts/build_task.sh (it passes the args and the task context, then
-# warms the JIT cache on a GPU, which docker build cannot do).
-#
-#   BASE_IMAGE  CI image digest from the parent commit's ci/docker-tags.yml
-#   REF_COMMIT  full 40-char hash of the reference (answer) commit; the image holds
-#               its parent (GitHub refuses short hashes in fetch)
-#   task        build context with the agent-visible task files (TASK.md, bench_task.py, ...)
+# Task image: FlashInfer at REF_COMMIT^ on the CI image that commit was tested
+# with. Built by scripts/build_task.sh, which passes BASE_IMAGE, REF_COMMIT and
+# the `task` context (copied to /task).
 
 ARG BASE_IMAGE
 FROM ${BASE_IMAGE}
@@ -18,20 +9,13 @@ FROM ${BASE_IMAGE}
 ARG REF_COMMIT
 WORKDIR /workspace/flashinfer
 
-# One RUN so no layer ever holds upstream history: fetch the reference commit and
-# its parent (fetch takes a hash, not REF_COMMIT^), refuse a merge commit whose ^
-# would be ambiguous, check out the parent, fetch all submodules (no hand-kept list that a later parent commit could
-# outgrow), drop every .git (the submodules' .git files too), then re-init as a
-# one-commit repo the agent's diff is taken against.
-#
-# Install like CI (scripts/setup_test_env.sh): --no-deps keeps the image's
-# preinstalled stack, FLASHINFER_BUILD_NO_PIP=1 stops the build hooks from pip
-# installing. BUILD_NVEP=0 skips the best-effort NIXL-EP (multi-GPU MoE EP) build,
-# which single-GPU kernel tasks never use.
-#
-# Install before `git init` so files the install generates (flashinfer/data
-# symlinks, _build_meta.py) are in the initial commit or gitignored, never in the
-# agent's diff.
+# One RUN, so no layer holds upstream history:
+# - fetch REF_COMMIT with depth 2 and check out its parent (refusing a merge commit),
+#   with all submodules, then drop every .git;
+# - install like CI (scripts/setup_test_env.sh); BUILD_NVEP=0 skips the multi-GPU
+#   NIXL-EP build;
+# - re-init as a one-commit repo after the install, so generated files are never
+#   in the agent's diff.
 RUN git init -q . \
  && git remote add origin https://github.com/flashinfer-ai/flashinfer.git \
  && git fetch -q --depth 2 origin "${REF_COMMIT}" \
@@ -51,5 +35,4 @@ RUN git init -q . \
 
 COPY --from=task . /task/
 
-# Keep the container alive under `docker run -d`; the agent attaches with docker exec.
 CMD ["sleep", "infinity"]

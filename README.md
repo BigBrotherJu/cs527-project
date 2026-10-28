@@ -4,61 +4,50 @@ Task candidates come from `../cs527_task_mining/`. This directory holds the
 experiment infrastructure.
 
 ```
-docker/Dockerfile          generic task image (one per task, built with build args)
-scripts/build_task.sh      docker build + JIT warm-up on a GPU + docker commit
-tasks/<id>/task.env        parent commit, CI image digest, reference commit, warm-up command
-tasks/<id>/task/           agent-visible files, copied to /task in the image
+docker/Dockerfile            task image: the parent commit on its CI image
+scripts/build_task.sh        docker build + warm-up on a GPU + docker commit
+scripts/eval_correctness.sh  visible + hidden tests and reference checks for one patch
+scripts/eval_perf.sh         interleaved, clock-locked timing of several patches
+scripts/common.sh            per-architecture image selection, shared mounts
+tasks/<id>/task.env          reference commit, CI image, supported SMs, tests, warm-up
+tasks/<id>/task/             agent-visible files, /task in the image
+tasks/<id>/eval/             evaluation only: ref.patch, hidden tests and shapes
 ```
 
-Evaluation-only material (hidden tests and shapes, the reference patch) is
-mounted into evaluation containers and never built into the image.
+A task runs on any GPU in its `SUPPORTED_SM`; results (baseline, reference and
+agent alike) hold for that architecture and are never mixed across
+architectures. Images are per architecture, `cs527/<id>:sm90` on H100. So far
+c3f7334d4 has been validated on SM90 only; its SM10x path is wired up but
+untested.
 
-## Build a task image (on the GPU host)
+## Build (on the GPU host, once per architecture)
 
 ```bash
 DOCKER="sudo docker" scripts/build_task.sh c3f7334d4 0
 ```
 
-The build fetches only the parent commit and its submodules (shallow),
-removes all git metadata, installs FlashInfer like CI does, and
-re-initializes `/workspace/flashinfer` as a one-commit repo. The warm-up then
-runs the task's tests and benchmark once on GPU 0, so the JIT module is
-compiled before the agent starts, and commits the container as
-`cs527/<id>:latest`.
-
-## Run a container for an agent
-
-Timing only (no GPU performance counters, so `ncu` fails with ERR_NVGPUCTRPERM):
+## Run an agent container
 
 ```bash
-sudo docker run -d --name c3f-timing-01 --gpus '"device=0"' --network none --ipc=host cs527/c3f7334d4:latest
+sudo docker run -d --name c3f-timing-01 --gpus '"device=0"' --network none --ipc=host cs527/c3f7334d4:sm90
 ```
 
-Timing + ncu: add `--cap-add SYS_ADMIN` (and mount the profiling tool once it exists).
+Timing only: without GPU performance counters `ncu` fails with
+ERR_NVGPUCTRPERM. Timing + ncu: add `--cap-add SYS_ADMIN`. Run as root with
+`HOME=/root` (the warmed JIT cache). Export the result with
+`git add -A && git diff --cached --binary` in `/workspace/flashinfer`.
 
-Containers must run as root with the default `HOME=/root`, where the warmed
-JIT cache lives. Export the agent's result with
-`git add -A && git diff --cached --binary` inside `/workspace/flashinfer`.
+## Evaluate
 
-## Evaluate a patch
-
-`tasks/<id>/eval/` holds the evaluation-only material: `ref.patch` (the
-upstream answer), `hidden_shapes.json` and `test_hidden_*.py`. Evaluation
-containers are offline and mount `/task` read-only from the host.
-`scripts/in_container/prepare.sh` drops edits to `tests/`, `benchmarks/` and
-`conftest.py` (reporting them) and clears the JIT build cache before anything runs.
-
-Correctness (visible + hidden tests, reference check on visible + hidden shapes):
+Evaluation containers are offline, mount `/task` read-only from the host, and
+discard patch edits to `tests/`, `benchmarks/` and `conftest.py`.
 
 ```bash
 DOCKER="sudo docker" scripts/eval_correctness.sh c3f7334d4 none results/base 0
-DOCKER="sudo docker" scripts/eval_correctness.sh c3f7334d4 tasks/c3f7334d4/eval/ref.patch results/ref 0
-```
-
-Performance (one container per arm, arm order rotated each round):
-
-```bash
+DOCKER="sudo docker" BASE_OUT=results/base scripts/eval_correctness.sh c3f7334d4 tasks/c3f7334d4/eval/ref.patch results/ref 0
 DOCKER="sudo docker" scripts/eval_perf.sh c3f7334d4 results/perf 0 5 base=none ref=tasks/c3f7334d4/eval/ref.patch
 ```
 
-Add `agent=<patch>` as a third arm to score an agent run.
+`BASE_OUT` lists every test whose outcome differs from the baseline, so a patch
+cannot pass by turning tests into skips. Add `agent=<patch>` as another perf arm
+to score an agent run.
