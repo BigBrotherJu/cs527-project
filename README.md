@@ -33,7 +33,10 @@ sudo docker run -d --name c3f-timing-01 --gpus '"device=0"' --network none --ipc
 ```
 
 Timing only: without GPU performance counters `ncu` fails with
-ERR_NVGPUCTRPERM. Timing + ncu: add `--cap-add SYS_ADMIN`. Run as root with
+ERR_NVGPUCTRPERM, but only if the host restricts profiling to admins
+(`RmProfilingAdminOnly: 1` in `/proc/driver/nvidia/params`; check with
+`require_profiling_admin_only` in `common.sh`). Timing + ncu: add
+`--cap-add SYS_ADMIN`. Run as root with
 `HOME=/root` (the warmed JIT cache). Export the result with
 `git add -A && git diff --cached --binary` in `/workspace/flashinfer`.
 

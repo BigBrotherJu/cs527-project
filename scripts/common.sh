@@ -38,3 +38,20 @@ eval_mounts() {
     PATCH_ARG=/eval/patch.diff
   fi
 }
+
+# require_profiling_admin_only: fail unless the host driver restricts GPU
+# performance counters to admins (RmProfilingAdminOnly: 1). Only then does
+# leaving out --cap-add SYS_ADMIN keep ncu from a timing-only agent; with 0, ncu
+# works in every container.
+# How to set:
+# echo 'options nvidia NVreg_RestrictProfilingToAdminUsers=1' | sudo tee /etc/modprobe.d/nvidia-profiling.conf
+# sudo update-initramfs -u
+# sudo reboot
+require_profiling_admin_only() {
+  local v
+  v=$(awk '/RmProfilingAdminOnly/ {print $2}' /proc/driver/nvidia/params)
+  if [ "${v}" != 1 ]; then
+    echo "RmProfilingAdminOnly is '${v}', not 1: ncu would work without SYS_ADMIN" >&2
+    return 1
+  fi
+}

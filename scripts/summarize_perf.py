@@ -26,7 +26,8 @@ def clock_report(out):
     log, cfg = out / "clocks_log.csv", out / "clocks.txt"
     if not log.exists():
         return
-    lock = dict(l.split("=", 1) for l in cfg.read_text().split()).get("sm_lock_mhz", "none")
+    locks = dict(l.split("=", 1) for l in cfg.read_text().split())
+    lock, mem_lock = locks.get("sm_lock_mhz", "none"), locks.get("mem_lock_mhz", "none")
     rows = []
     for line in log.read_text().splitlines():
         f = [x.strip() for x in line.split(",")]
@@ -39,7 +40,7 @@ def clock_report(out):
         return
     busy = [r for r in rows if not r[5] & GPU_IDLE] or rows
     sm = sorted(r[0] for r in busy)
-    print(f"clocks: SM lock {lock} MHz; {len(rows)} samples; busy SM min {sm[0]:.0f} median "
+    print(f"clocks: SM lock {lock} MHz, expected memory {mem_lock} MHz; {len(rows)} samples; busy SM min {sm[0]:.0f} median "
           f"{statistics.median(sm):.0f} MHz; mem {min(r[1] for r in rows):.0f}-{max(r[1] for r in rows):.0f} "
           f"of max {rows[0][2]:.0f} MHz; power max {max(r[3] for r in rows):.0f} W; "
           f"temp max {max(r[4] for r in rows):.0f} C")
@@ -48,8 +49,9 @@ def clock_report(out):
         print(f"WARNING: throttled during the rounds: {', '.join(sorted(reasons))}")
     if lock != "none" and sm[0] < 0.99 * float(lock):
         print(f"WARNING: busy SM clock fell to {sm[0]:.0f} MHz, below the {lock} MHz lock")
-    if any(r[1] < r[2] for r in rows):
-        print("WARNING: memory clock was below its max during the rounds")
+    mem_target = float(mem_lock) if mem_lock != "none" else rows[0][2]
+    if any(r[1] < mem_target for r in rows):
+        print(f"WARNING: memory clock fell below {mem_target:.0f} MHz during the rounds")
 
 
 def load(out, arm, shape_set, devices):

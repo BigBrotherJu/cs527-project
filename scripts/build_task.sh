@@ -29,12 +29,14 @@ ${DOCKER} build \
 # containers must run as root with HOME=/root. The amend folds anything the
 # warm-up left in the tree into the initial commit, out of the agent's diff.
 # FLASHINFER_JIT_VERBOSE is exported inside bash: a -e variable would be baked
-# into the committed image.
+# into the committed image. FLASHINFER_JIT_DEBUG=0 is required with it: unset,
+# the JIT treats VERBOSE=1 as a debug build (-O0, ~100x slower), whose cache
+# entries a normal run would not reuse.
 echo "== warm up on GPU ${GPU} -> ${IMAGE}"
 WARM="warm-${TASK_ID}-$$"
 ${DOCKER} run --name "${WARM}" --gpus "\"device=${GPU}\"" --ipc=host \
   -w /workspace/flashinfer "cs527/${TASK_ID}:base" \
-  bash -c "set -e; export FLASHINFER_JIT_VERBOSE=1; ${WARMUP_CMD}; git add -A; git commit -q --amend --no-edit; git status --short"
+  bash -c "set -e; export FLASHINFER_JIT_VERBOSE=1 FLASHINFER_JIT_DEBUG=0; ${WARMUP_CMD}; git add -A; git commit -q --amend --no-edit; git status --short"
 ${DOCKER} commit --change 'CMD ["sleep", "infinity"]' "${WARM}" "${IMAGE}" >/dev/null
 ${DOCKER} rm "${WARM}" >/dev/null
 ${DOCKER} images "cs527/${TASK_ID}"

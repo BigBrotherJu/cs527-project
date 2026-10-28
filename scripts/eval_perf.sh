@@ -7,15 +7,17 @@
 #
 #   scripts/eval_perf.sh <task_id> <out_dir> <gpu_index> <rounds> <name>=<patch|none> ...
 #
-# The SM clock is locked for the rounds and reset on exit. The default target is
-# the GPU's default applications clock, not its max: power or thermal limits
-# override a lock, and a max-clock lock is the likeliest to hit them. HBM has a
-# fixed clock, so it is only checked. clocks_log.csv samples clocks, power,
+# The SM clock is locked (-lgc) for the rounds and reset on exit, by default at
+# the GPU's default applications clock. The memory clock cannot be fixed at run
+# time on H100 (-lmc is unsupported and exits 0 anyway; -lmcd needs a driver
+# reload; -ac changes only the reported applications clock, measured: HBM stays
+# at 2619 MHz under load either way), so it is checked against the default
+# applications memory clock instead. clocks_log.csv samples clocks, power,
 # temperature and throttle reasons every 500 ms during the rounds; the summary
-# flags power or thermal throttling, SM clock below the lock, and memory clock
-# below its max.
+# flags power or thermal throttling and SM or memory clocks below their targets.
 #
-#   GPU_CLOCK=<MHz>   lock to this clock instead
+#   GPU_CLOCK=<MHz>       SM clock to lock to instead
+#   GPU_MEM_CLOCK=<MHz>   expected memory clock instead
 #   LOCK_CLOCKS=0     do not lock (e.g. no root); clocks.txt says so
 #   NVSMI             lock/reset command (default: "sudo nvidia-smi")
 set -euo pipefail
@@ -64,15 +66,18 @@ done
 
 # Lock only around the timed rounds: the per-arm builds above are CPU-bound.
 if [ "${LOCK_CLOCKS}" != 0 ]; then
-  CLOCK=${GPU_CLOCK:-$(nvidia-smi -i "${GPU}" --query-gpu=clocks.default_applications.graphics --format=csv,noheader,nounits)}
-  [[ "${CLOCK}" =~ ^[0-9]+$ ]] || { echo "no default applications clock (${CLOCK}); set GPU_CLOCK" >&2; exit 1; }
-  ${NVSMI} -i "${GPU}" -lgc "${CLOCK},${CLOCK}"
+  query() { nvidia-smi -i "${GPU}" --query-gpu="$1" --format=csv,noheader,nounits; }
+  CLOCK=${GPU_CLOCK:-$(query clocks.default_applications.graphics)}
+  MEM_CLOCK=${GPU_MEM_CLOCK:-$(query clocks.default_applications.memory)}
+  [[ "${CLOCK}${MEM_CLOCK}" =~ ^[0-9]+$ ]] ||
+    { echo "no default applications clocks (${CLOCK}, ${MEM_CLOCK}); set GPU_CLOCK and GPU_MEM_CLOCK" >&2; exit 1; }
   LOCKED=1
-  echo "locked GPU ${GPU} SM clock at ${CLOCK} MHz"
-  echo "sm_lock_mhz=${CLOCK}" > "${OUT}/clocks.txt"
+  ${NVSMI} -i "${GPU}" -lgc "${CLOCK},${CLOCK}" >/dev/null
+  echo "locked GPU ${GPU} SM clock at ${CLOCK} MHz; expecting memory at ${MEM_CLOCK} MHz"
+  printf 'sm_lock_mhz=%s\nmem_lock_mhz=%s\n' "${CLOCK}" "${MEM_CLOCK}" > "${OUT}/clocks.txt"
 else
   echo "GPU ${GPU} clocks NOT locked (LOCK_CLOCKS=0)"
-  echo "sm_lock_mhz=none" > "${OUT}/clocks.txt"
+  printf 'sm_lock_mhz=none\nmem_lock_mhz=none\n' > "${OUT}/clocks.txt"
 fi
 
 # Newer drivers renamed clocks_throttle_reasons to clocks_event_reasons.
