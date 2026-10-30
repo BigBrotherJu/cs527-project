@@ -14,9 +14,9 @@ CUDA kernels and their dispatch are in `csrc/bgmv_moe/moe_bgmv_impl.cuh`.
 
 The expand op is memory-bound: every (token, expert) pair reads a
 `feat_out x feat_in` slice of LoRA-B. The reads of the weight matrix W are
-poorly coalesced: profiling measured about 7.6 L2 sectors per global load
-request on W, against about 4 for a fully coalesced access, so roughly half of
-each memory transaction is wasted. The gap grows with the number of pairs.
+poorly coalesced: profiling shows many more L2 sectors per global load request
+on W than a fully coalesced access needs, so a large part of each memory
+transaction is wasted. The gap grows with the number of pairs.
 
 ## What to do
 
@@ -34,11 +34,6 @@ other shapes and dtypes it supports.
 - Your solution is evaluated on the visible tests and benchmark shapes and on
   hidden ones (other ranks, hidden sizes, token counts and fp16).
 
-## Tools
+## Environment
 
-    pytest -q tests/moe/test_bgmv_moe.py tests/moe/test_bgmv_moe_lora_delta.py \
-        tests/moe/test_trtllm_gen_fused_moe.py::test_moe_lora_delta  # skipped below SM100
-    python /task/bench_task.py            # median GPU time per shape (us)
-    python /task/bench_task.py --check    # plus a check against a torch reference
-
-The shapes timed are in `/task/shapes.json`. There is no network access.
+The benchmark shapes are in `/task/shapes.json`. There is no network access.

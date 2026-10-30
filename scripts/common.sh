@@ -11,7 +11,7 @@ load_task() {
   TASK_DIR="${ROOT}/tasks/$1"
   # shellcheck source=/dev/null
   source "${TASK_DIR}/task.env"
-  DOCKER=${DOCKER:-docker}   # DOCKER="sudo docker" when not in the docker group
+  DOCKER=${DOCKER:-docker}   # needs docker-group membership; set DOCKER only to use another binary
   local cc arch
   cc=$(nvidia-smi -i "$2" --query-gpu=compute_cap --format=csv,noheader) || return 1
   arch=${cc//./}

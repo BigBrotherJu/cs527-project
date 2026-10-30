@@ -64,6 +64,11 @@ for arm in "$@"; do
   ${DOCKER} exec "${c}" python /task/bench_task.py --repeat-ms 20 > "${OUT}/${name}/warmup.log" 2>&1
 done
 
+# Hold the GPU for the timed rounds: agents' tools (gpu_tools.py) take the same
+# lock, so their GPU work waits instead of overlapping the timing.
+exec 9> "/tmp/cs527-gpu${GPU}.lock"
+flock 9
+
 # Lock only around the timed rounds: the per-arm builds above are CPU-bound.
 if [ "${LOCK_CLOCKS}" != 0 ]; then
   query() { nvidia-smi -i "${GPU}" --query-gpu="$1" --format=csv,noheader,nounits; }
