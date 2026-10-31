@@ -40,9 +40,8 @@ from minisweagent import __version__, package_dir
 from minisweagent.agents.default import DefaultAgent
 from minisweagent.models.litellm_model import LitellmModel
 
-from gpu_tools import ARMS, DOCKER, GpuToolEnvironment, tools_prompt
-
-ROOT = Path(__file__).resolve().parents[1]
+from gpu_tools import ARMS, GpuToolEnvironment, tools_prompt
+from task import DOCKER, ROOT, load_task, require_profiling_admin_only
 
 # Diff of the working tree against HEAD, untracked files included, built in a
 # scratch index so the agent's own git index is left untouched.
@@ -58,23 +57,6 @@ of one launch of a CUDA kernel. Summarize it for the engineer optimizing this ke
 limits its performance, the evidence (metric names and values), and what the numbers suggest \
 changing. Be specific and concise (at most 300 words). Do not invent metrics that are not in \
 the report."""
-
-
-def load_task(task_id, gpu, check_profiling):
-    """IMAGE plus the task.env variables, via common.sh (which rejects unsupported GPUs).
-
-    GPU workers for run_tests and bench run the agent's code without SYS_ADMIN;
-    a host that restricts performance counters to admins keeps that code from
-    profiling itself."""
-    names = ["IMAGE", "VISIBLE_TESTS", "BUILD_CMD", "PROFILE_KERNEL", "PROFILE_SHAPE"]
-    check = "require_profiling_admin_only || exit 1;" if check_profiling else ""
-    cmd = f"source scripts/common.sh; load_task {task_id} {gpu} || exit 1; {check} printf '%s\\0' " + \
-        " ".join(f'"${n}"' for n in names)
-    out = subprocess.run(["bash", "-c", cmd], cwd=ROOT, env={**os.environ, "ROOT": str(ROOT)},
-                         capture_output=True, text=True)
-    if out.returncode:
-        raise SystemExit(out.stderr.strip())
-    return dict(zip(names, out.stdout.split("\0")))
 
 
 def repo_diff(container_id):
@@ -188,18 +170,22 @@ def main():
     out = a.out_dir.resolve()
     steps_dir = out / "steps"
     steps_dir.mkdir(parents=True, exist_ok=False)  # never overwrite a run
-    task_env = load_task(a.task_id, a.gpu, a.profiling_check)
-    image = task_env["IMAGE"]
-    sm = image.rsplit(":sm", 1)[1]                    # e.g. 90, 100
+    task = load_task(a.task_id, a.gpu)
+    if a.profiling_check:
+        # GPU workers for run_tests and bench run the agent's code without
+        # SYS_ADMIN; a host that restricts performance counters to admins keeps
+        # that code from profiling itself.
+        require_profiling_admin_only()
+    image = task.image
     # The agent's container has no GPU to detect the target from (e.g. 9.0a).
-    build_env = {"FLASHINFER_CUDA_ARCH_LIST": f"{sm[:-1]}.{sm[-1]}a", "FLASHINFER_JIT_DEBUG": "0",
+    build_env = {"FLASHINFER_CUDA_ARCH_LIST": task.cuda_arch, "FLASHINFER_JIT_DEBUG": "0",
                  "MAX_JOBS": str(a.max_jobs)}
 
     # Per-run volumes, filled from the image on first mount, shared with the
     # GPU workers; /task comes read-only from the host.
     tag = f"cs527-{re.sub(r'[^a-zA-Z0-9]+', '-', out.name)}-{os.getpid()}"
     volumes = {f"{tag}-ws": "/workspace/flashinfer", f"{tag}-cache": "/root/.cache/flashinfer",
-               f"{tag}-scratch": "/scratch", str(ROOT / "tasks" / a.task_id / "task"): "/task:ro"}
+               f"{tag}-scratch": "/scratch", str(task.dir / "task"): "/task:ro"}
     run_args = ["--rm", "--network", "none"]
     for name, path in volumes.items():
         run_args += ["-v", f"{name}:{path}"]
@@ -210,9 +196,9 @@ def main():
     cfg = yaml.safe_load((Path(package_dir) / "config" / "mini.yaml").read_text())
     cfg["agent"].update(yaml.safe_load((ROOT / "scripts" / "agent_prompt.yaml").read_text()))
     cfg["agent"].pop("mode", None)  # interactive mini CLI only
-    task = ((ROOT / "tasks" / a.task_id / "task" / "TASK.md").read_text()
-            + tools_prompt(a.arm, task_env["PROFILE_SHAPE"])
-            + f"\nYou have at most {a.step_limit} responses (steps).\n")
+    instance = ((task.dir / "task" / "TASK.md").read_text()
+                + tools_prompt(a.arm, task.config["profile"]["shape"])
+                + f"\nYou have at most {a.step_limit} responses (steps).\n")
     summary_usage = []
 
     effort = {"reasoning_effort": a.reasoning_effort} if a.reasoning_effort else {}
@@ -225,7 +211,7 @@ def main():
         return resp.choices[0].message.content, usage
 
     env = GpuToolEnvironment(
-        arm=a.arm, gpu=a.gpu, volumes=volumes, task_env=task_env, root=ROOT, build_env=build_env,
+        arm=a.arm, gpu=a.gpu, volumes=volumes, task=task, root=ROOT, build_env=build_env,
         summarize=summarize, log_path=out / "tools.jsonl",
         image=image, cwd="/workspace/flashinfer", run_args=run_args, timeout=a.command_timeout,
         container_timeout="24h",
@@ -248,7 +234,7 @@ def main():
 
     start = time.time()
     try:
-        agent.run(task)
+        agent.run(instance)
     finally:
         try:
             meta = record(a, out, steps_dir, image, agent, env, summary_usage, time.time() - start)

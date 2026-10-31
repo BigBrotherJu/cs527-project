@@ -1,0 +1,40 @@
+# Task c3f7334d4: coalesced W loads in the MoE BGMV expand kernel
+title = "Coalesced W loads in the MoE BGMV expand kernel"
+upstream_pr = "https://github.com/flashinfer-ai/flashinfer/pull/3542"
+
+# The reference commit; the image holds its parent (ref_commit^).
+ref_commit = "c3f7334d43072684c25456659551446f8a75120b"
+
+# CI image named by the parent's ci/docker-tags.yml
+# (flashinfer/flashinfer-ci-cu129:20260822-9a0e83b, linux/amd64 digest).
+base_image = "docker.io/flashinfer/flashinfer-ci-cu129@sha256:b0181ed5707140c87a06834ca07676f20e1c212c2c63e58712a8cf6dfdf312c6"
+
+# Architectures the tests cover: _SUPPORTED_SM of the upstream
+# tests/moe/test_bgmv_moe.py (the hidden test uses the same set). The kernel also
+# compiles for e.g. SM120, but every bgmv test skips there.
+supported_sm = [90, 100, 103]
+
+# Every upstream test that reaches the expand kernel (also listed in TASK.md).
+# The trtllm-gen MoE LoRA test skips below SM100. The image build runs these and
+# bench_task.py once, so the JIT modules and cubins are in the image (agents and
+# evaluation run offline).
+visible_tests = [
+  "tests/moe/test_bgmv_moe.py",
+  "tests/moe/test_bgmv_moe_lora_delta.py",
+  "tests/moe/test_trtllm_gen_fused_moe.py::test_moe_lora_delta",
+]
+
+# Where evaluation copies eval/test_hidden_*.py, beside the visible tests so
+# they run under the same conftest.py.
+hidden_test_dir = "tests/moe"
+
+# Builds the JIT module the task is about, without a GPU (agents compile in a
+# GPU-less container before their tools run code on a GPU).
+build_cmd = '''python -c 'from flashinfer.jit.bgmv_moe import gen_bgmv_moe_module; gen_bgmv_moe_module().build_and_load()''''
+
+[profile]
+# ncu -k regex for the agents' `profile` tool: the kernels the task is about.
+kernel = "expand"
+# Shape `profile` uses when the agent names none: a large visible shape, where
+# the kernel is limited by memory rather than by launch overhead.
+shape = "Prefill-512tok-LargeMoE"

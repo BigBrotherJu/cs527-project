@@ -1,4 +1,4 @@
-"""Count test outcomes in an eval_correctness.sh result dir and, optionally,
+"""Count test outcomes in an eval_correctness.py result dir and, optionally,
 compare them per test against a baseline result dir from the same architecture.
 
     python3 scripts/test_counts.py <out_dir> [--base <base_out_dir>]

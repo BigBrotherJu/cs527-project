@@ -1,4 +1,4 @@
-"""Summarize evaluated agent runs (eval_runs.sh): one row per run, then per arm.
+"""Summarize evaluated agent runs (eval_runs.py): one row per run, then per arm.
 
     python3 scripts/summarize_runs.py <runs_dir> <eval_dir>
 

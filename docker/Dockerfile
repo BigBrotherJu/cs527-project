@@ -1,6 +1,6 @@
 # check=skip=InvalidDefaultArgInFrom
 # Task image: FlashInfer at REF_COMMIT^ on the CI image that commit was tested
-# with. Built by scripts/build_task.sh, which passes BASE_IMAGE, REF_COMMIT and
+# with. Built by scripts/build_task.py, which passes BASE_IMAGE, REF_COMMIT and
 # the `task` context (copied to /task).
 
 ARG BASE_IMAGE

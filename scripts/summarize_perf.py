@@ -1,4 +1,4 @@
-"""Summarize eval_perf.sh output: per shape, the median over rounds of each arm's
+"""Summarize eval_perf.py output: per shape, the median over rounds of each arm's
 per-round median time, the spread across rounds, and the speedup of every arm
 over the first one (the baseline).
 

@@ -15,9 +15,7 @@ container mounting the agent's volumes, so the worker finds the build done.
 Which commands exist, and what `profile` returns, depends on the arm.
 """
 
-import fcntl
 import json
-import os
 import re
 import shlex
 import subprocess
@@ -25,7 +23,8 @@ import time
 
 from minisweagent.environments.docker import DockerEnvironment
 
-DOCKER = os.getenv("MSWEA_DOCKER_EXECUTABLE", "docker")  # the binary DockerEnvironment uses
+from task import DOCKER, gpu_lock
+
 BUILD_TIMEOUT = 1800  # seconds per build
 GPU_TIMEOUT = 900     # seconds per GPU run (normally ~10): a hung kernel must not hold the GPU
 
@@ -89,10 +88,10 @@ files they read under /scratch.
 
 
 class GpuToolEnvironment(DockerEnvironment):
-    def __init__(self, *, arm, gpu, volumes, task_env, root, build_env, summarize, log_path, **kwargs):
+    def __init__(self, *, arm, gpu, volumes, task, root, build_env, summarize, log_path, **kwargs):
         """build_env: variables for builds and GPU workers (target arch, MAX_JOBS, ...)."""
         super().__init__(**kwargs)
-        self.arm, self.gpu, self.volumes, self.task_env = arm, gpu, volumes, task_env
+        self.arm, self.gpu, self.volumes, self.task = arm, gpu, volumes, task
         self.root, self.build_env, self.summarize, self.log_path = root, build_env, summarize, log_path
         self.on_tests_passed = lambda: None  # set by the runner: snapshot the passing tree
         # Placeholders for the arm's tools, reached only when a tool is called
@@ -140,7 +139,7 @@ class GpuToolEnvironment(DockerEnvironment):
 
         build = subprocess.run(
             [DOCKER, "exec", "-w", "/workspace/flashinfer", *self._env_args(), self.container_id,
-             "bash", "-lc", self.task_env["BUILD_CMD"]],
+             "bash", "-lc", self.task.config["build_cmd"]],
             capture_output=True, text=True, timeout=BUILD_TIMEOUT)
         rec["build_s"] = round(time.time() - t0, 1)
         if build.returncode:
@@ -148,21 +147,20 @@ class GpuToolEnvironment(DockerEnvironment):
             return _result("build failed:\n" + (build.stdout + build.stderr)[-8000:], build.returncode)
 
         if name == "run_tests":
-            inner = f"pytest -q -p no:cacheprovider -rfE --tb=short {self.task_env['VISIBLE_TESTS']}"
+            inner = f"pytest -q -p no:cacheprovider -rfE --tb=short {self.task.visible_tests}"
         elif name == "bench":
             inner = shlex.join(["python", "/task/bench_task.py", *argv[1:]])
         else:
+            profile = self.task.config["profile"]
             profile_mode = "full" if mode == "summary" else mode
             extra = ["--save"] if mode != "summary" else []
             if not {"--shape", "--shapes"} & {x.split("=")[0] for x in argv[1:]}:
-                extra += ["--shape", self.task_env["PROFILE_SHAPE"]]
+                extra += ["--shape", profile["shape"]]
             inner = shlex.join(["python", "/eval/bin/profile_task.py", profile_mode,
-                                self.task_env["PROFILE_KERNEL"], *argv[1:], *extra])
+                                profile["kernel"], *argv[1:], *extra])
 
-        with open(f"/tmp/cs527-gpu{self.gpu}.lock", "w") as lock:
-            t1 = time.time()
-            fcntl.flock(lock, fcntl.LOCK_EX)
-            rec["wait_s"] = round(time.time() - t1, 1)
+        with gpu_lock(self.gpu) as waited:
+            rec["wait_s"] = round(waited, 1)
             t2 = time.time()
             worker = f"{self.container_id[:12]}-gpu-{int(t2)}"
             try:
