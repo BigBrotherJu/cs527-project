@@ -1,21 +1,29 @@
 # CS527 project: agents on delegated GPU kernel optimization
 
 Task candidates come from `../cs527_task_mining/`. This directory holds the
-experiment infrastructure.
+benchmark and the agent experiment built on it. `agent/` uses `benchmark/`,
+never the other way round. Run everything from this directory with
+`python3 -m`.
 
 ```
-docker/Dockerfile            task image: the parent commit on its CI image
-scripts/build_task.py        docker build + warm-up on a GPU + docker commit
-scripts/eval_correctness.py  visible + hidden tests and reference checks for one patch
-scripts/eval_perf.py         interleaved, clock-locked timing of several patches
-scripts/task.py              task.toml, per-architecture image selection, shared mounts
-scripts/run_agent(s).py      one mini-swe-agent run / several runs per arm
-scripts/gpu_tools.py         run_tests / bench / profile for GPU-less agent containers
-scripts/agent_prompt.yaml    the agent's prompt templates
-scripts/eval_runs.py         evaluate every run of a task; summarize_runs.py makes the table
-tasks/<id>/task.toml         reference commit, CI image, supported SMs, tests, build, profile
-tasks/<id>/task/             agent-visible files, /task in the image
-tasks/<id>/eval/             evaluation only: ref.patch, hidden tests and shapes
+benchmark/                     tasks and their evaluation; any patch can be scored
+  tasks/<id>/task.toml         reference commit, CI image, supported SMs, tests, build, profile
+  tasks/<id>/task/             agent-visible files, /task in the image
+  tasks/<id>/eval/             evaluation only: ref.patch, hidden tests and shapes
+  docker/Dockerfile            task image: the parent commit on its CI image
+  task.py                      task.toml, per-architecture image selection, mounts, GPU lock
+  build_task.py                docker build + warm-up on a GPU + docker commit
+  eval_correctness.py          visible + hidden tests and reference checks for one patch
+  eval_perf.py                 interleaved, clock-locked timing of several patches
+  test_counts.py, summarize_perf.py   result summaries used by the two above
+  container/prepare.sh         applies a patch inside an evaluation container
+agent/                         the agent experiment
+  run_agent.py, run_agents.py  one mini-swe-agent run / several runs per arm
+  gpu_tools.py                 run_tests / bench / profile for GPU-less agent containers
+  prompt.yaml                  the agent's prompt templates
+  container/profile_task.py    the profile tool, inside a GPU worker
+  eval_runs.py                 evaluate every run of a task; summarize_runs.py makes the table
+local-results/                 results kept locally (not in git)
 ```
 
 A task runs on any GPU in its `supported_sm`; results (baseline, reference and
@@ -24,25 +32,43 @@ architectures. Images are per architecture, `cs527/<id>:sm90` on H100. So far
 c3f7334d4 has been validated on SM90 only; its SM10x path is wired up but
 untested.
 
-## Build (on the GPU host, once per architecture)
+## Benchmark
+
+### Build (on the GPU host, once per architecture)
 
 The scripts call plain `docker` (and mini-swe-agent cannot call it through
 `sudo`), so add yourself to the docker group once and log in again:
 
 ```bash
 sudo usermod -aG docker $USER
-python3 scripts/build_task.py c3f7334d4 0
+python3 -m benchmark.build_task c3f7334d4 0
 ```
 
-## Run agents
+### Evaluate a patch
+
+Evaluation containers are offline, mount `/task` read-only from the host, and
+discard patch edits to `tests/`, `benchmarks/` and `conftest.py`.
+
+```bash
+python3 -m benchmark.eval_correctness c3f7334d4 none results/base 0
+python3 -m benchmark.eval_correctness c3f7334d4 benchmark/tasks/c3f7334d4/eval/ref.patch results/ref 0 --base results/base
+python3 -m benchmark.eval_perf c3f7334d4 results/perf 0 5 base=none ref=benchmark/tasks/c3f7334d4/eval/ref.patch
+```
+
+`--base` lists every test whose outcome differs from the baseline, so a patch
+cannot pass by turning tests into skips. Add `agent=<patch>` as another perf arm
+to score an agent run. `eval_perf` locks the SM clock with `sudo nvidia-smi`
+(`--sm-clock`, `--mem-clock`, `--no-lock-clocks`, `--nvsmi`; see `--help`).
+
+## Agent experiment
 
 The agent is [mini-swe-agent](https://github.com/SWE-agent/mini-swe-agent),
 run on the GPU host. The model is queried from the host; the agent's commands
 run in an offline container with no GPU, where it edits and compiles. Code
-reaches the GPU only through the arm's tools (`scripts/gpu_tools.py`): each
-call builds the tree in the agent's container, then runs in a GPU worker
-container that mounts the agent's volumes, behind one lock per GPU, so several
-agents can share a GPU without overlapping timings.
+reaches the GPU only through the arm's tools (`agent/gpu_tools.py`): each call
+builds the tree in the agent's container, then runs in a GPU worker container
+that mounts the agent's volumes, behind one lock per GPU, so several agents
+can share a GPU without overlapping timings.
 
 | arm | tools |
 |---|---|
@@ -63,51 +89,39 @@ The host must restrict GPU performance counters to admins
 (`RmProfilingAdminOnly: 1` in `/proc/driver/nvidia/params`, set with
 `options nvidia NVreg_RestrictProfilingToAdminUsers=1` in `/etc/modprobe.d`), so
 code the agent runs through `run_tests` or `bench` cannot profile itself;
-`run_agent.py` refuses to start otherwise (`--no-profiling-check` for pilots).
+`agent.run_agent` refuses to start otherwise (`--no-profiling-check` for pilots).
 
-Then, for N attempts per arm (started in alternating arm order; `--parallel`
-agents at a time share the GPU, each building with cores/`--parallel` jobs):
+### Run agents
+
+For N attempts per arm (started in alternating arm order; `--parallel` agents
+at a time share the GPU, each building with cores/`--parallel` jobs):
 
 ```bash
-~/mswea/bin/python scripts/run_agents.py c3f7334d4 0 3 ~/runs --parallel 3
+~/mswea/bin/python -m agent.run_agents c3f7334d4 0 3 ~/runs --parallel 3
 ```
 
 The agent's prompt is `TASK.md`, the arm's tools and the step budget, inside
-our templates (`scripts/agent_prompt.yaml`).
+our templates (`agent/prompt.yaml`).
 
-`--arms timing ncu-full` limits the arms; `run_agent.py` options go after `--`
-(`--model`, default `openai/gpt-6.1-sol`; `--step-limit`, default 150). Each run
-directory (`~/runs/<task>/<arm>-<k>/`) holds `final.patch`, per-step snapshots
-in `steps/`, `trajectory.json`, `tools.jsonl` (build, queue and GPU seconds per
-tool call), `passed/` (the tree at every passing `run_tests`) and `meta.json`
-(steps, tokens, cost, wall time, exit status, tool calls, and any mention of
-profilers or GPU timing APIs). `scored.patch` is what gets evaluated:
-`final.patch` if the agent submitted, otherwise its last passing `run_tests`
-snapshot (empty if its tests never passed).
+`--arms timing ncu-full` limits the arms; `agent.run_agent` options go after
+`--` (`--model`, default `openai/gpt-6.1-sol`; `--step-limit`, default 150).
+Each run directory (`~/runs/<task>/<arm>-<k>/`) holds `final.patch`, per-step
+snapshots in `steps/`, `trajectory.json`, `tools.jsonl` (build, queue and GPU
+seconds per tool call), `passed/` (the tree at every passing `run_tests`) and
+`meta.json` (steps, tokens, cost, wall time, exit status, tool calls, and any
+mention of profilers or GPU timing APIs). `scored.patch` is what gets
+evaluated: `final.patch` if the agent submitted, otherwise its last passing
+`run_tests` snapshot (empty if its tests never passed).
+
+### Evaluate runs
 
 To evaluate all runs of a task (correctness of each `scored.patch`, then one
 interleaved perf eval of base, reference and every correct run, then
 `summary.md` and `runs.csv`):
 
 ```bash
-python3 scripts/eval_runs.py c3f7334d4 ~/runs/c3f7334d4 ~/evals/c3f7334d4 0 5
+python3 -m agent.eval_runs c3f7334d4 ~/runs/c3f7334d4 ~/evals/c3f7334d4 0 5
 ```
 
-`eval_perf.py` holds the same per-GPU lock as the agents' tools while timing,
-so it can run while agents are still working.
-
-## Evaluate
-
-Evaluation containers are offline, mount `/task` read-only from the host, and
-discard patch edits to `tests/`, `benchmarks/` and `conftest.py`.
-
-```bash
-python3 scripts/eval_correctness.py c3f7334d4 none results/base 0
-python3 scripts/eval_correctness.py c3f7334d4 tasks/c3f7334d4/eval/ref.patch results/ref 0 --base results/base
-python3 scripts/eval_perf.py c3f7334d4 results/perf 0 5 base=none ref=tasks/c3f7334d4/eval/ref.patch
-```
-
-`--base` lists every test whose outcome differs from the baseline, so a patch
-cannot pass by turning tests into skips. Add `agent=<patch>` as another perf arm
-to score an agent run. `eval_perf.py` locks the SM clock with `sudo nvidia-smi`
-(`--sm-clock`, `--mem-clock`, `--no-lock-clocks`, `--nvsmi`; see `--help`).
+`eval_perf` holds the same per-GPU lock as the agents' tools while timing, so
+it can run while agents are still working.
